@@ -45,7 +45,7 @@ tasks_queue = {}
 assigned_tasks = {}
 
 # A single demo task to get started
-demo_task = Task(task_id=str(uuid.uuid4()), payload={"message": "print 'Hello world!'"})
+demo_task = Task(task_id=str(uuid.uuid4()), payload=TaskPayload(message="print 'Hello world!'"))
 tasks_queue[demo_task.task_id] = demo_task
 
 # The lease duration for a task
