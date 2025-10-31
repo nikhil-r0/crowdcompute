@@ -3,8 +3,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
-sys.path.append('..')
-from schema import  RegisterForm, TaskPayload, Task
+from schema import  RegisterForm, TaskPayload, Task # type: ignore
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
