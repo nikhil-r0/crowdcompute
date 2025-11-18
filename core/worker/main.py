@@ -1,4 +1,6 @@
 import asyncio
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 from schema import RegisterForm, Capabilities, BasePlugin # type: ignore
 import requests
@@ -17,7 +19,7 @@ CAPABILITIES = Capabilities(cpus=4, ram_gb=16, gpus=1)
 WORKER_NAME = "Worker-1"
 REGISTER_FORM = RegisterForm(name=WORKER_NAME, capabilities=CAPABILITIES)
 # Get Coordinator URL from environment variable, default to localhost for local testing
-COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
+COORDINATOR_URL = os.environ.get("COORDINATOR_URL",os.environ.get("NOT_TEST_URL", "http://localhost:8000"))
 Worker_id = ""
 POLL_INTERVAL_NO_TASK = 10
 POLL_INTERVAL_AFTER_TASK = 2

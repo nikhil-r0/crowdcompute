@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import uuid
 import shutil
@@ -55,7 +57,7 @@ register_job_creator_plugins()
 
 # Get base URL from environment variable
 # This is the PUBLIC address workers will use to reach the coordinator
-COORDINATOR_BASE_URL = os.environ.get("COORDINATOR_BASE_URL", "http://localhost:8000")
+COORDINATOR_BASE_URL = os.environ.get("COORDINATOR_BASE_URL", os.environ.get("NOT_TEST_URL", "http://localhost:8000"))
 print(f"Coordinator public URL set to: {COORDINATOR_BASE_URL}")
 
 
