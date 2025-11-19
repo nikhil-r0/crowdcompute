@@ -2,247 +2,167 @@ import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 import sys
-from schema import RegisterForm, Capabilities, BasePlugin # type: ignore
+from schema import RegisterForm, Capabilities, BasePlugin #type:ignore
 import requests
 import json
 import time
 import os
 import shutil
-from typing import Dict, Type
+from typing import Dict, Type, Optional
 
-# Import the new, split plugins
+# Plugins
 from plugins.sort_map import SortMapPlugin
 from plugins.sort_reduce import SortReducePlugin
+from plugins.hashcat import HashcatPlugin
 
-# --- Worker Configuration ---
+# Config
 CAPABILITIES = Capabilities(cpus=4, ram_gb=16, gpus=1)
 WORKER_NAME = "Worker-1"
 REGISTER_FORM = RegisterForm(name=WORKER_NAME, capabilities=CAPABILITIES)
-# Get Coordinator URL from environment variable, default to localhost for local testing
-COORDINATOR_URL = os.environ.get("COORDINATOR_URL",os.environ.get("NOT_TEST_URL", "http://localhost:8000"))
+COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
 Worker_id = ""
-POLL_INTERVAL_NO_TASK = 10
-POLL_INTERVAL_AFTER_TASK = 2
+POLL_INTERVAL_NO_TASK = 5
+POLL_INTERVAL_AFTER_TASK = 1
 WORKER_DATA_DIR = "worker_data"
 
-# --- NEW: Plugin Registry ---
 PLUGIN_REGISTRY: Dict[str, Type[BasePlugin]] = {}
 
 def register_plugins():
-    """
-    Finds and registers all available plugins.
-    The worker uses this to map a job_type to the correct execution code.
-    The worker uses this to map a 'job_type' to the correct execution code.
-    """
     print("Registering plugins...")
-    # Add all your plugin classes here
-    plugins_to_register = [SortMapPlugin, SortReducePlugin] 
-    
-    for plugin_class in plugins_to_register:
-        job_type = plugin_class.get_job_type() # Simplified
-        if job_type in PLUGIN_REGISTRY:
-            print(f"Warning: Duplicate job_type '{job_type}' found. Overwriting.")
-        PLUGIN_REGISTRY[job_type] = plugin_class
-        print(f"  Registered '{job_type}' -> {plugin_class.__name__}")
-
-# --- Worker Functions (register, get_task, release_task, download, upload) ---
-# (These functions are unchanged from the previous version)
+    plugins = [SortMapPlugin, SortReducePlugin, HashcatPlugin] 
+    for p in plugins:
+        PLUGIN_REGISTRY[p.get_job_type()] = p
+        print(f"  Registered '{p.get_job_type()}' -> {p.__name__}")
 
 async def register_worker():
-    """ Registers the worker with the coordinator. """
-    print(f"Registering with Coordinator: {REGISTER_FORM.model_dump_json()}")
     try:
         request = requests.post(f"{COORDINATOR_URL}/register", json=REGISTER_FORM.model_dump())
         request.raise_for_status()
         global Worker_id
         Worker_id = request.json()["worker_id"]
-        print(f"Successfully registered. Worker ID: {Worker_id}")
+        print(f"Registered with ID: {Worker_id}")
         return True
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to register worker: {e}")
+    except Exception as e: 
+        print(f"Registration failed: {e}")
         return False
 
-async def get_task():
-    """ Gets a task from the coordinator. """
-    print("Polling for task...")
+async def get_task() -> Optional[dict]:
+    """
+    Fetches a task. Returns the task dictionary if one exists, 
+    or None if the queue is empty or an error occurred.
+    """
     try:
-        request = requests.post(f"{COORDINATOR_URL}/get-task", params={"worker_id": Worker_id})
-        request.raise_for_status()
-        response_data = request.json()
+        r = requests.post(f"{COORDINATOR_URL}/get-task", params={"worker_id": Worker_id})
         
-        if "task" in response_data:
-            return response_data
-        else:
+        if r.status_code == 200:
+            data = r.json()
+            # Encapsulation: Only return if it's actually a task
+            if "task" in data:
+                return data
+            
+            # If we get here, it's a 200 OK but "No tasks available"
             return None
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to get task: {e}")
+            
+        return None
+    except Exception as e: 
+        print(f"Error polling for task: {e}")
         return None
 
-async def release_task(task_id: str):
-    """ Releases a completed task. """
-    print(f"Releasing task {task_id}...")
-    try:
-        request = requests.post(
-            f"{COORDINATOR_URL}/release-task",
-            params={"worker_id": Worker_id, "task_id": task_id}
-        )
-        request.raise_for_status()
-        print(f"Successfully released task {task_id}: {request.json()}")
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to release task {task_id}: {e}")
+async def release_task(task_id):
+    try: requests.post(f"{COORDINATOR_URL}/release-task", params={"worker_id": Worker_id, "task_id": task_id})
+    except: pass
 
-async def download_file(url: str, save_path: str):
-    """ Downloads a file from a URL. """
+async def download_file(url, path):
     try:
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(save_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        print(f"  Downloaded {url} to {save_path}")
+        r = requests.get(url, stream=True)
+        r.raise_for_status()
+        with open(path, 'wb') as f:
+             for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
         return True
-    except requests.exceptions.RequestException as e:
-        print(f"  Failed to download {url}: {e}")
+    except Exception as e:
+        print(f"Download error: {e}")
         return False
 
-async def upload_file(url: str, file_path: str):
-    """ Uploads a file to a URL. """
+async def upload_file(url, path):
     try:
-        with open(file_path, 'rb') as f:
-            files = {'file': (os.path.basename(file_path), f)}
-            r = requests.post(url, files=files)
-            r.raise_for_status()
-        print(f"  Uploaded {file_path} to {url}")
+        with open(path, 'rb') as f:
+            requests.post(url, files={'file': (os.path.basename(path), f)})
         return True
-    except requests.exceptions.RequestException as e:
-        print(f"  Failed to upload {file_path}: {e}")
+    except Exception as e:
+        print(f"Upload error: {e}")
         return False
-
-# --- Task Processing Logic (REFACTORED) ---
 
 async def process_task(task: dict):
-    """
-    REFACTORED: This function now routes tasks to plugins
-    based on the PLUGIN_REGISTRY.
-    """
     task_id = task['task_id']
     payload = task['payload']
     job_type = payload.get('job_type', 'unknown')
+    params = payload.get('params', {}) 
     
-    # 1. Create a temporary working directory for this task
     task_dir = os.path.join(WORKER_DATA_DIR, task_id)
-    if os.path.exists(task_dir):
-        shutil.rmtree(task_dir)
+    if os.path.exists(task_dir): shutil.rmtree(task_dir)
     os.makedirs(task_dir)
     
-    print(f"\n--- [TASK {task_id} RECEIVED] ---")
-    print(f"  Job Type: {job_type}")
-    print(f"  Created temp dir: {task_dir}")
+    print(f"\n--- [TASK {task_id}] Job: {job_type} ---")
 
-    # 2. Download all input files
     local_input_files = {}
     download_success = True
     for name, url in payload.get('input_files', {}).items():
-        # Use a predictable name based on the key (e.g., 'data', 'hashes')
         local_path = os.path.join(task_dir, name)
         if await download_file(url, local_path):
             local_input_files[name] = local_path
         else:
-            print(f"  Failed to get input file {name}. Aborting task.")
             download_success = False
             break
     
     if not download_success:
-        shutil.rmtree(task_dir) # Clean up
-        return # Skip this task (we should implement a failure report)
+        shutil.rmtree(task_dir)
+        return 
 
-    # 3. Execute work based on job_type
-    local_result_path = "" # Path to the file we will upload
+    local_result_path = "" 
     
     if job_type in PLUGIN_REGISTRY:
-        # --- Plugin-based execution ---
         plugin = PLUGIN_REGISTRY[job_type]
-        print(f"  Routing task to plugin: {plugin.__name__}")
         try:
-            # Pass params to execute_task (simplified)
             success, result_path = plugin.execute_task(
                 local_input_files=local_input_files,
-                local_output_dir=task_dir
+                local_output_dir=task_dir,
+                params=params 
             )
             if success:
                 local_result_path = result_path
-            else:
-                print(f"  Plugin {plugin.__name__} failed task.")
         except Exception as e:
-            print(f"  Plugin {plugin.__name__} raised an exception: {e}")
-
-    elif job_type == 'hashcat_demo':
-        # --- Legacy Hashcat Demo Logic ---
-        # (This can be moved to its own plugin later)
-        print("  Simulating hashcat command...")
-        cmd = (
-            f"  hashcat -m {payload.get('params', {}).get('hashcat_mode', '?')} "
-            f"-o {os.path.join(task_dir, 'result.pot')} "
-            f"{local_input_files.get('hashes', '?')} "
-            f"{local_input_files.get('wordlist', '?')}"
-        )
-        print(cmd)
-        await asyncio.sleep(2) # Shorter simulation
-        
-        # Create dummy result
-        local_result_path = os.path.join(task_dir, "demo_result.pot")
-        with open(local_result_path, "w") as f:
-            f.write("8743b52063cd84097a65d1633f5c74f5:hashcat\n")
-        print(f"  Created dummy result at {local_result_path}")
-        
+            print(f"  Plugin execution error: {e}")
     else:
-        print(f"  Unknown job_type: {job_type}. No plugin registered.")
+        print(f"  Unknown job_type: {job_type}")
 
-    # 4. Upload the result (if one was created)
     if local_result_path and os.path.exists(local_result_path):
         upload_url = payload.get('output_path')
         if upload_url:
             await upload_file(upload_url, local_result_path)
-        else:
-            print("  No output_path defined. Skipping upload.")
-    else:
-        print("  No result file generated. Skipping upload.")
 
-    # 5. Clean up the task directory
-    try:
-        shutil.rmtree(task_dir)
-        print(f"  Cleaned up temp dir: {task_dir}")
-    except Exception as e:
-        print(f"  Failed to clean up temp dir {task_dir}: {e}")
-
-    print(f"--- [TASK {task_id} COMPLETE] ---\n")
+    try: shutil.rmtree(task_dir)
+    except: pass
+    print(f"--- [TASK COMPLETE] ---\n")
 
 async def main_loop():
-    """ Main worker loop. """
     os.makedirs(WORKER_DATA_DIR, exist_ok=True)
-    if not await register_worker():
-        print("Registration failed. Exiting.")
-        return
+    if not await register_worker(): return
 
     while True:
+        # CLEAN LOOP: The logic is now much simpler to read
         task_data = await get_task()
+        
         if task_data:
             task_object = task_data['task']
             await process_task(task_object)
             await release_task(task_object['task_id'])
             await asyncio.sleep(POLL_INTERVAL_AFTER_TASK)
         else:
-            print(f"No tasks available. Sleeping for {POLL_INTERVAL_NO_TASK} seconds...")
             await asyncio.sleep(POLL_INTERVAL_NO_TASK)
 
 if __name__ == "__main__":
+    register_plugins()
     try:
-        # Register plugins on worker startup
-        register_plugins()
-        print("Starting worker...")
         asyncio.run(main_loop())
     except KeyboardInterrupt:
-        print("\nWorker shutting down. Cleaning up...")
-        if os.path.exists(WORKER_DATA_DIR):
-            shutil.rmtree(WORKER_DATA_DIR)
-            print(f"Removed {WORKER_DATA_DIR}")
+        print("Worker stopped.")

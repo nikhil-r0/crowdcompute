@@ -1,43 +1,33 @@
-version: '3.8'
-
 services:
-  # The Coordinator Service
   coordinator:
     build:
-      context: . # Assumes this file is in the project root
+      context: .
       dockerfile: core/coordinator/Dockerfile
     ports:
-      - "8000:8000" # Expose port 8000 to your host machine
+      - "8000:8000"
     volumes:
-      # This mounts the host's file_storage into the container
-      # so that job files persist even if the container restarts.
       - ./file_storage:/app/file_storage
-    # --- THIS IS THE FIX ---
-    # This block was missing from your pasted file.
-    # It tells the coordinator to use http://coordinator:8000 as its public URL
     environment:
       - COORDINATOR_BASE_URL=http://coordinator:8000
-    # --- END FIX ---
     networks:
       - crowd-net
     
-  # The Worker Service
   worker:
     build:
       context: .
       dockerfile: core/worker/Dockerfile
     depends_on:
-      - coordinator # Tells Docker to start the coordinator first
+      - coordinator
     environment:
-      # This is correct! It tells the worker where to find the coordinator.
       - COORDINATOR_URL=http://coordinator:8000
+    # --- NEW: Mount the Docker Socket ---
     volumes:
-      # Mount the worker's data directory
       - ./worker_data:/app/core/worker/worker_data
+      - /var/run/docker.sock:/var/run/docker.sock
+    # ------------------------------------
     networks:
       - crowd-net
 
-# Define the shared network
 networks:
   crowd-net:
     driver: bridge

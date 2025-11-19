@@ -1,0 +1,16 @@
+123456
+password
+12345678
+qwerty
+12345
+123456789
+football
+sky
+walker
+monkey
+hashcat
+dragon
+baseball
+superman
+michael
+batman

@@ -5,36 +5,26 @@ from typing import List, Dict, Any, Optional
 from fastapi import UploadFile
 
 # Import the base class and schema
-from schema import BasePlugin, TaskPayload
+from schema import BasePlugin, TaskPayload, Task
 
 class SortMapPlugin(BasePlugin):
     """
     Plugin for the "map" step of a distributed sort.
-    - Implements 'create_job_tasks' to shard the file.
-    - Implements 'execute_task' to sort a single chunk.
     """
 
     @staticmethod
     def get_job_type() -> str:
-        """
-        Returns the single job type this plugin handles.
-        """
         return "sort_map"
 
     @staticmethod
     def create_job_tasks(
         job_id: str,
-        job_dir: str, # Local path on coordinator (e.g., "file_storage/jobs/job_123")
+        job_dir: str, 
         coordinator_base_url: str,
         uploaded_file: Optional[UploadFile],
         params: Dict[str, Any]
     ) -> (tuple[List[TaskPayload], Dict[str, Any]]):
-        """
-        Handles the "submit_sort_job" logic on the coordinator.
-        - Saves the uploaded file.
-        - Shards the file.
-        - Creates all 'sort_map' tasks.
-        """
+        
         if not uploaded_file:
             raise ValueError("SortPlugin requires a file upload.")
 
@@ -56,17 +46,17 @@ class SortMapPlugin(BasePlugin):
         if not chunk_file_paths:
             raise Exception("Failed to shard file")
 
-        # 3. Create 'sort_map' task payloads for each chunk
+        # 3. Create 'sort_map' task payloads
         task_payloads = []
         for chunk_path in chunk_file_paths:
-            task_id = str(uuid.uuid4()) # This is a placeholder
+            task_id = str(uuid.uuid4()) 
             chunk_filename = os.path.basename(chunk_path)
             chunk_url = f"{coordinator_base_url}/data/jobs/{job_id}/{chunk_filename}"
             
             payload = TaskPayload(
                 job_type="sort_map",
-                input_files={"data": chunk_url}, # Worker will download this
-                output_path=f"{coordinator_base_url}/upload/{job_id}/{task_id}", # This will be replaced
+                input_files={"data": chunk_url}, 
+                output_path=f"{coordinator_base_url}/upload/{job_id}/{task_id}", 
                 params={}
             )
             task_payloads.append(payload)
@@ -76,21 +66,18 @@ class SortMapPlugin(BasePlugin):
             "job_type": "sort",
             "total_tasks": len(chunk_file_paths),
             "completed_tasks": 0,
-            "map_results": [] # This will be filled by the upload endpoint
+            "map_results": [] 
         }
     
         print(f"SortMapPlugin created {len(task_payloads)} map tasks for job {job_id}.")
-        
         return task_payloads, initial_job_status
 
     @staticmethod
     def execute_task(
-        local_input_files: Dict[str, str], # Dict of {name: local_path}
-        local_output_dir: str # A temp dir to write results to
+        local_input_files: Dict[str, str],
+        local_output_dir: str ,
+        params: Dict[str, Any] # <--- Added params (ignored)
     ) -> (tuple[bool, str]):
-        """
-        Executes the 'sort_map' task: sorts a single chunk.
-        """
         local_result_path = ""
         success = False
 
@@ -99,30 +86,67 @@ class SortMapPlugin(BasePlugin):
         if input_file:
             print(f"  Executing sort_map on {input_file}")
             success = SortMapPlugin._execute_map(input_file, local_result_path)
-            if success:
-                print(f"  sort_map complete. Output: {local_result_path}")
-            else:
-                print("  sort_map failed.")
         
         if not success:
-            local_result_path = "" # Don't upload if it failed
+            local_result_path = "" 
 
         return success, local_result_path
+
+    @staticmethod
+    def on_task_complete(
+        task: Task,
+        job_status: Dict[str, Any],
+        tasks_queue: Dict[str, Task],
+        coordinator_base_url: str
+    ) -> None:
+        """
+        Handles logic when a 'sort_map' task finishes.
+        Checks if all maps are done, then triggers 'sort_reduce'.
+        """
+        job_id = task.job_id
+        
+        if job_id not in job_status:
+            return
+
+        current_job = job_status[job_id]
+        current_job["completed_tasks"] += 1
+        print(f"Sort job {job_id} progress: {current_job['completed_tasks']}/{current_job['total_tasks']} map tasks complete.")
+        
+        # Check if all map tasks for this job are done
+        if current_job["completed_tasks"] == current_job["total_tasks"]:
+            print(f"All map tasks for {job_id} complete. Creating reduce task...")
+            
+            # Create the single reduce task
+            reduce_task_id = str(uuid.uuid4())
+            reduce_payload = TaskPayload(
+                job_type="sort_reduce", 
+                # Pass all the sorted chunk URLs as input
+                input_files={
+                    f"chunk_{i}": url for i, url in enumerate(current_job["map_results"])
+                },
+                output_path=f"{coordinator_base_url}/upload/{job_id}/{reduce_task_id}",
+                params={}
+            )
+            reduce_task = Task(
+                task_id=reduce_task_id,
+                job_id=job_id,
+                payload=reduce_payload
+            )
+            
+            tasks_queue[reduce_task.task_id] = reduce_task
+            print(f"Queued reduce task {reduce_task.task_id} for job {job_id}")
+
 
     # --- Internal Helper Methods ---
 
     @staticmethod
     def _shard(input_file_path: str, output_dir: str, num_chunks: int) -> list[str]:
-        """ Internal helper: Shards a large file into smaller chunks. """
-        print(f"Sharding file {input_file_path} into {num_chunks} chunks...")
         chunk_files = []
         try:
             with open(input_file_path, 'r') as f:
                 total_lines = sum(1 for line in f)
             
-            if total_lines == 0:
-                print("Warning: Input file is empty.")
-                return []
+            if total_lines == 0: return []
 
             lines_per_chunk = (total_lines // num_chunks) + 1
             
@@ -147,30 +171,20 @@ class SortMapPlugin(BasePlugin):
                         f_out = open(chunk_path, 'w')
                         
                 f_out.close()
-            
-            print(f"Sharding complete. Created {len(chunk_files)} chunk files.")
             return chunk_files
 
         except Exception as e:
             print(f"Failed to shard file: {e}")
-            for f in chunk_files:
-                if os.path.exists(f):
-                    os.remove(f)
             return []
 
     @staticmethod
     def _execute_map(local_input_path: str, local_output_path: str) -> bool:
-        """ Internal helper: Sorts a single chunk of data. """
         try:
             with open(local_input_path, 'r') as f_in:
                 lines = f_in.readlines()
-            
             lines.sort()
-            
             with open(local_output_path, 'w') as f_out:
                 f_out.writelines(lines)
-                
             return True
-        except Exception as e:
-            print(f"Sort map execution failed: {e}")
+        except Exception:
             return False
