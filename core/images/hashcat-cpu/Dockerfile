@@ -7,15 +7,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 1. Update and install dependencies
 # - hashcat: The cracker
 # - pocl-opencl-icd: The CPU OpenCL driver
-# - --no-install-recommends: Avoids installing heavy extras like docs/themes
+# - clinfo: Utility to verify OpenCL availability
+# - Removed: libpoclu-dev (not needed for runtime execution)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     hashcat \
     pocl-opencl-icd \
+    clinfo \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Verify installation (useful debug step during build)
-RUN hashcat --version
+# 2. Verify OpenCL installation during build
+# If this fails during 'docker build', we know the image is broken.
+RUN clinfo
 
 # 3. Set entrypoint to allow command injection
 ENTRYPOINT ["/bin/bash", "-c"]
