@@ -76,7 +76,7 @@ class HashcatPlugin(BasePlugin):
             "cracked_password": None,
             "total_tasks": len(task_payloads),
             "completed_tasks": 0,
-            "map_results": [] # Critical for kill switch
+            "map_results": [] 
         }
         
         return task_payloads, initial_status
@@ -109,10 +109,11 @@ class HashcatPlugin(BasePlugin):
                 return False, ""
             
             container_name = f"hashcat_worker_{uuid.uuid4().hex[:8]}"
+            
             print(f"  [DooD] Spawning hashcat container for hash {target_hash}...")
         
-            # Clean command: no extra apt-get, no clinfo fallback
-            cmd = f"hashcat -m {hash_mode} -a 0 -D 1,2 --force --outfile /root/result.txt --potfile-disable {target_hash} /root/wordlist.txt"
+            # Clean command (Removed clinfo fallback)
+            cmd = f"hashcat -m {hash_mode} -a 0 -D 1,2 --force -O --self-test-disable --outfile /root/result.txt --potfile-disable {target_hash} /root/wordlist.txt"
             
             container = client.containers.create(
                 image=image_name,
@@ -120,7 +121,13 @@ class HashcatPlugin(BasePlugin):
                 name=container_name,
                 entrypoint="",
                 detach=True,
-                privileged=True 
+                privileged=True,
+                volumes={
+                    'crowdcompute_hashcat_cache': {
+                        'bind': '/root/.hashcat',
+                        'mode': 'rw'
+                    }
+                }
             )
             
             with open(wordlist_path, 'rb') as f:
@@ -139,10 +146,10 @@ class HashcatPlugin(BasePlugin):
             container.start()
             result = container.wait() 
             
-            # We only print logs if there was a non-zero exit code AND it wasn't just "exhausted"
-            # Hashcat exit code 1 usually means exhausted. 0 means cracked.
-            exit_code = result.get('StatusCode', 1)
-            
+            # Logs are commented out as requested, uncomment to debug
+            # logs = container.logs().decode('utf-8')
+            # print(f"  [Hashcat Logs]:\n{logs}")
+
             cracked_content = None
             try:
                 bits, stat = container.get_archive('/root/result.txt')
