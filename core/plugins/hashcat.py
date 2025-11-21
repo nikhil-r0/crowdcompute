@@ -108,13 +108,18 @@ class HashcatPlugin(BasePlugin):
                 print(f"  [DooD] ERROR: Image '{image_name}' not found! Please run ./build_images.sh")
                 return False, ""
             
+            session_id = f"sess_{uuid.uuid4().hex[:8]}"
+            
             container_name = f"hashcat_worker_{uuid.uuid4().hex[:8]}"
             
             print(f"  [DooD] Spawning hashcat container for hash {target_hash}...")
         
             # Clean command (Removed clinfo fallback)
-            cmd = f"hashcat -m {hash_mode} -a 0 -D 1,2 --force -O --self-test-disable --outfile /root/result.txt --potfile-disable {target_hash} /root/wordlist.txt"
-            
+            cmd = (
+                f"hashcat -m {hash_mode} -a 0 -D 1,2 --force -O --self-test-disable "
+                f"--session {session_id} " 
+                f"--outfile /root/result.txt --potfile-disable {target_hash} /root/wordlist.txt"
+            )            
             container = client.containers.create(
                 image=image_name,
                 command=cmd,
@@ -147,8 +152,8 @@ class HashcatPlugin(BasePlugin):
             result = container.wait() 
             
             # Logs are commented out as requested, uncomment to debug
-            # logs = container.logs().decode('utf-8')
-            # print(f"  [Hashcat Logs]:\n{logs}")
+            logs = container.logs().decode('utf-8')
+            print(f"  [Hashcat Logs]:\n{logs}")
 
             cracked_content = None
             try:

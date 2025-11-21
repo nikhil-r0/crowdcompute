@@ -19,7 +19,7 @@ from plugins.hashcat import HashcatPlugin
 CAPABILITIES = Capabilities(cpus=4, ram_gb=16, gpus=1)
 WORKER_NAME = "Worker-1"
 REGISTER_FORM = RegisterForm(name=WORKER_NAME, capabilities=CAPABILITIES)
-COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
+COORDINATOR_URL = os.environ.get("COORDINATOR_URL", os.environ.get("NOT_TEST_URL", "http://localhost:8000"))
 Worker_id = ""
 POLL_INTERVAL_NO_TASK = 5
 POLL_INTERVAL_AFTER_TASK = 1
