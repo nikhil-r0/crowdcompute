@@ -1,87 +1,131 @@
-
-**CrowdCompute: Distributed Task Execution Framework**
+# **CrowdCompute: Distributed Task Execution Framework**
 
 CrowdCompute is a modular, plugin-based distributed computing framework that allows you to offload heavy processing tasks—like password cracking or data sorting—to a network of lightweight worker nodes.
 
-🚀 **Key Features**
-**Plugin Architecture:** Easily extendable to support new job types (e.g., ML training, rendering) by adding a Python class.
-**Docker-outside-of-Docker (DooD):** Workers are lightweight Python containers that spawn specialized, ephemeral sibling containers for heavy tasks.
-**Generic Coordinator:** A central server that manages job queues, file storage, and task assignment without knowing the specifics of the job logic.
-**Smart Distribution:** Supports sharding input files and chaining tasks (Map -> Reduce).
+---
 
-📋 **Prerequisites**
-Before running the project, ensure you have the following installed on all machines (Coordinator and Workers):
+## 🚀 **Key Features**
 
-* Docker: Install Docker
-* Docker Compose: (Usually included with Docker Desktop/Engine)
-* Python 3.11+ (Optional, for running test scripts locally)
-
-🛠️ **Setup Guide**
+* **Plugin Architecture:** Extend with new job types (ML training, rendering, etc.).
+* **Docker-outside-of-Docker (DooD):** Workers spawn sibling containers for heavy tasks.
+* **Generic Coordinator:** Manages job queues, storage, and scheduling.
+* **Smart Distribution:** Supports sharding, parallel execution, and Map→Reduce flows.
 
 ---
 
-### **1. Network Configuration (Crucial for Multi-Device)**
+## 📋 **Prerequisites**
 
-For workers to connect to the Coordinator from different machines, they need to know the Coordinator's IP address.
+Install the following on **all machines** (Coordinator + Workers):
 
-**Find the Coordinator's Local IP:**
-On the machine running the Coordinator, run `ifconfig` (Linux/Mac) or `ipconfig` (Windows).
-Note the IP address (e.g., `<IP>`).
-
-**Configure Environment Variables:**
-Create a `.env` file in `core/coordinator/` and `core/worker/` (or pass these variables at runtime).
-
-* **Coordinator:** Set `COORDINATOR_BASE_URL` to its own public IP/URL.
-* **Worker:** Set `COORDINATOR_URL` to point to the Coordinator.
+* Docker
+* Docker Compose
+* Python 3.11+ (optional, for submitting test jobs)
 
 ---
 
-### **2. Prepare Specialized Images (Hashcat)**
+# 🛠️ Setup Guide
 
-If you plan to run Password Cracking (Hashcat) jobs, you must build the optimized CPU-ready image on every worker machine once. This prevents the worker from downloading or building it during a task.
+---
 
-Run this script from the root of the project:
+## **1. Network Configuration (Required for Multi-Device Deployments)**
+
+Workers must connect to the Coordinator through its IP.
+
+### **Find the Coordinator IP**
+
+On the machine running the Coordinator:
+
+* macOS/Linux: `ifconfig`
+* Windows: `ipconfig`
+
+Use this IP wherever `<COORDINATOR_IP>` is shown.
+
+---
+
+## **2. Update `.env` Files (Coordinator + Workers)**
+
+CrowdCompute relies on environment variables stored in `.env` or `.env.local`.
+
+You **must** update these values on both Coordinator and Worker machines.
+
+---
+
+### **core/coordinator/.env or .env.local**
 
 ```
+COORDINATOR_BASE_URL=http://<COORDINATOR_IP>:8000
+NOT_TEST_URL=http://<COORDINATOR_IP>:8000
+```
+
+---
+
+### **core/worker/.env or .env.local**
+
+```
+COORDINATOR_URL=http://<COORDINATOR_IP>:8000
+NOT_TEST_URL=http://<COORDINATOR_IP>:8000
+```
+
+❗ **Do not leave `NOT_TEST_URL="your_coordinator_url"` unchanged — workers will not connect.**
+This must be set to the actual Coordinator URL.
+
+---
+
+## **3. Prepare Plugin Images (Hashcat)**
+
+Required only if you will run password-cracking jobs.
+
+Run this once on every Worker machine:
+
+```bash
 ./build_images.sh
 ```
 
-This builds a local image named `crowd-hashcat-cpu:latest` (~200MB).
+This builds the optimized plugin image:
+
+```
+crowd-hashcat-cpu:latest
+```
 
 ---
 
-## 🏃‍♂️ Running the System
+# 🏃‍♂️ Running the System
 
-### **Option A: Using Docker Compose (Single Machine / Dev)**
+---
 
-This is the easiest way to test everything on one computer.
+## **Option A — Docker Compose (One Machine / Dev Mode)**
 
-```
+Easiest way to test everything:
+
+```bash
 docker-compose up --build
 ```
 
-This starts one Coordinator and one Worker on a shared internal network (`crowd-net`).
+This starts:
+
+* 1 Coordinator
+* 1 Worker
+* Shared internal Docker network (`crowd-net`)
 
 ---
 
-### **Option B: Standalone / Distributed Mode (Multiple Machines)**
+## **Option B — Distributed Mode (Multiple Machines)**
 
-Follow these steps to run the Coordinator on one machine and Workers on others.
+Deploy Coordinator and Workers on different machines in the same network.
 
 ---
 
-### **Step 1: Start the Coordinator (Machine A)**
+# **Step 1 — Start the Coordinator (Machine A)**
 
-**Build the image:**
+### Build the image:
 
-```
+```bash
 docker build -t coordinator -f core/coordinator/Dockerfile .
 ```
 
-**Run the container:**
-Replace `YOUR_PUBLIC_IP` with the actual IP (e.g., `<IP>`).
+### Run the Coordinator:
 
-```
+```bash
 docker run --rm \
   --name coordinator \
   -p 8000:8000 \
@@ -89,28 +133,27 @@ docker run --rm \
   coordinator
 ```
 
+The `.env` file provides the Coordinator URL — no `-e` flags needed.
+
 ---
 
-### **Step 2: Start a Worker (Machine B, C, D...)**
+# **Step 2 — Start a Worker (Machine B, C, D...)**
 
-**Build the images (First time only):**
+### Build the Worker:
 
-```
-# 1. Build the base worker image
+```bash
 docker build -t worker -f core/worker/Dockerfile .
+```
 
-# 2. Build the plugin dependency image (Hashcat)
+### (Optional) Build plugin dependency images:
+
+```bash
 ./build_images.sh
 ```
 
-**Run the Worker:**
-Replace `http://<IP>:8000` with your Coordinator's URL.
+### Run the Worker:
 
-Critical Flags:
-`-v /var/run/docker.sock:/var/run/docker.sock`: Gives the worker control over the host's Docker daemon (required for plugins).
-`-v crowdcompute_hashcat_cache:/root/.hashcat`: Optional but recommended for performance caching.
-
-```
+```bash
 docker run --rm \
   --name worker \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -118,71 +161,91 @@ docker run --rm \
   worker
 ```
 
+**Important Flags:**
+
+* `-v /var/run/docker.sock:/var/run/docker.sock` → Required for plugin containers
+* `-v crowdcompute_hashcat_cache:/root/.hashcat` → Optional cache for faster Hashcat runs
+
 ---
 
-## 🧪 Submitting Jobs
-
-You can submit jobs using the provided Python scripts in the root directory or via the API directly.
+# 🧪 Submitting Jobs
 
 ---
 
-### **1. Password Cracking (Hashcat)**
+## **1. Password Cracking (Hashcat)**
 
-Crack a password using a distributed wordlist attack.
+### Create a sample wordlist:
 
-**Create a demo wordlist:**
-
-```
+```bash
 echo "password123" > demo_wordlist.txt
 echo "secret" >> demo_wordlist.txt
-echo "hashcat" >> demo_wordlist.txt  # The target!
+echo "hashcat" >> demo_wordlist.txt
 echo "admin" >> demo_wordlist.txt
 ```
 
-**Run the submission script:**
-Ensure you have the `requests` library installed (`pip install requests`).
+### Submit a job:
+
+In `submit_hashcat.py`, update:
 
 ```
-# Edit submit_hashcat.py to set COORDINATOR_URL="http://<IP>:8000"
+COORDINATOR_URL="http://<COORDINATOR_IP>:8000"
+```
+
+Then run:
+
+```bash
 python submit_hashcat.py
 ```
 
 ---
 
-### **2. Distributed Sorting (MapReduce)**
+## **2. Distributed Sorting (MapReduce)**
 
-Sort a large text file by splitting it among workers.
-
-```
+```bash
 python test.py sort_map demo_wordlist.txt --chunks 4
 ```
 
 ---
 
-📂 **Project Structure**
+# 📂 Project Structure
 
 ```
-core/coordinator/: The FastAPI server managing tasks.
-core/worker/: The generic worker agent.
-core/plugins/:
-    hashcat.py: Logic for password cracking tasks.
-    sort_map.py: Logic for sorting chunks of data.
-    sort_reduce.py: Logic for merging sorted chunks.
-core/images/: Custom Dockerfiles for plugins (e.g., hashcat-cpu).
-file_storage/: Local storage for uploaded files and results.
+core/coordinator/       → FastAPI coordinator service
+core/worker/            → Generic worker agent
+core/plugins/
+    hashcat.py          → Hashcat plugin
+    sort_map.py         → Map step for sorting
+    sort_reduce.py      → Reduce step for sorting
+core/images/            → Dockerfiles for plugin containers
+file_storage/           → Uploaded files + task results
 ```
 
 ---
 
-⚠️ **Troubleshooting**
+# ⚠️ Troubleshooting
 
-* **Worker can't connect?**
-  Check if the Coordinator's IP is reachable from the Worker machine (`ping <COORDINATOR_IP>`).
-  Ensure port 8000 is open in the firewall.
+### Worker cannot connect
 
-* **"Image not found" error?**
-  You forgot to run `./build_images.sh` on the worker machine.
+* Ensure the Worker can reach the Coordinator:
+  `ping <COORDINATOR_IP>`
+* Check firewall permissions for port 8000.
 
-* **"Connection aborted / FileNotFoundError"?**
-  You forgot to mount the Docker socket (`-v /var/run/docker.sock:/var/run/docker.sock`) when running the worker.
+### “Image not found”
+
+You forgot:
+
+```bash
+./build_images.sh
+```
+
+### Docker errors (FileNotFoundError, connection errors)
+
+You likely forgot this mount:
+
+```bash
+-v /var/run/docker.sock:/var/run/docker.sock
+```
+
+---
+
 
