@@ -26,7 +26,7 @@ For workers to connect to the Coordinator from different machines, they need to 
 
 **Find the Coordinator's Local IP:**
 On the machine running the Coordinator, run `ifconfig` (Linux/Mac) or `ipconfig` (Windows).
-Note the IP address (e.g., `192.168.1.50`).
+Note the IP address (e.g., `<IP>`).
 
 **Configure Environment Variables:**
 Create a `.env` file in `core/coordinator/` and `core/worker/` (or pass these variables at runtime).
@@ -79,14 +79,13 @@ docker build -t coordinator -f core/coordinator/Dockerfile .
 ```
 
 **Run the container:**
-Replace `YOUR_PUBLIC_IP` with the actual IP (e.g., `192.168.1.50`).
+Replace `YOUR_PUBLIC_IP` with the actual IP (e.g., `<IP>`).
 
 ```
 docker run --rm \
   --name coordinator \
   -p 8000:8000 \
   -v "$(pwd)/file_storage:/app/file_storage" \
-  -e COORDINATOR_BASE_URL="http://YOUR_PUBLIC_IP:8000" \
   coordinator
 ```
 
@@ -105,7 +104,7 @@ docker build -t worker -f core/worker/Dockerfile .
 ```
 
 **Run the Worker:**
-Replace `http://192.168.1.50:8000` with your Coordinator's URL.
+Replace `http://<IP>:8000` with your Coordinator's URL.
 
 Critical Flags:
 `-v /var/run/docker.sock:/var/run/docker.sock`: Gives the worker control over the host's Docker daemon (required for plugins).
@@ -116,7 +115,6 @@ docker run --rm \
   --name worker \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v crowdcompute_hashcat_cache:/root/.hashcat \
-  -e COORDINATOR_URL="http://192.168.1.50:8000" \
   worker
 ```
 
@@ -145,7 +143,7 @@ echo "admin" >> demo_wordlist.txt
 Ensure you have the `requests` library installed (`pip install requests`).
 
 ```
-# Edit submit_hashcat.py to set COORDINATOR_URL="http://192.168.1.50:8000"
+# Edit submit_hashcat.py to set COORDINATOR_URL="http://<IP>:8000"
 python submit_hashcat.py
 ```
 
@@ -179,7 +177,7 @@ file_storage/: Local storage for uploaded files and results.
 ⚠️ **Troubleshooting**
 
 * **Worker can't connect?**
-  Check if the Coordinator's IP is reachable from the Worker machine (`ping 192.168.1.50`).
+  Check if the Coordinator's IP is reachable from the Worker machine (`ping <COORDINATOR_IP>`).
   Ensure port 8000 is open in the firewall.
 
 * **"Image not found" error?**
